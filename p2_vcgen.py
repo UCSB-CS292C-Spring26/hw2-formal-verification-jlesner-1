@@ -142,37 +142,35 @@ def wp(stmt: Stmt, Q: BoolRef) -> BoolRef:
     """
     Compute the weakest precondition of `stmt` w.r.t. postcondition `Q`.
     For while loops, append side VCs to the global `side_vcs` list.
-
-    TODO: Implement all six cases.
     """
     global side_vcs
 
     match stmt:
         case Assign(var, expr):
-            # TODO: Q[var ↦ expr]
-            pass
+            return z3_substitute_var(Q, var, aexp_to_z3(expr))
 
         case Seq(s1, s2):
-            # TODO
-            pass
+            return wp(s1, wp(s2, Q))
 
         case If(cond, s1, s2):
-            # TODO
-            pass
+            b = bexp_to_z3(cond)
+            return z3.And(z3.Implies(b, wp(s1, Q)),
+                          z3.Implies(z3.Not(b), wp(s2, Q)))
 
         case While(cond, inv, body):
-            # TODO: Return I. Generate two side VCs:
-            #   preservation: I ∧ b → wp(body, I)
-            #   postcondition: I ∧ ¬b → Q
-            pass
+            b = bexp_to_z3(cond)
+            I = bexp_to_z3(inv)
+            side_vcs.append(("preservation",
+                             z3.Implies(z3.And(I, b), wp(body, I))))
+            side_vcs.append(("postcondition",
+                             z3.Implies(z3.And(I, z3.Not(b)), Q)))
+            return I
 
         case Assert(cond):
-            # TODO
-            pass
+            return z3.And(bexp_to_z3(cond), Q)
 
         case Assume(cond):
-            # TODO
-            pass
+            return z3.Implies(bexp_to_z3(cond), Q)
 
         case _:
             raise ValueError(f"Unknown statement: {stmt}")
@@ -183,8 +181,6 @@ def verify(pre: BExp, stmt: Stmt, post: BExp, label: str = "Program"):
     Verify the Hoare triple {pre} stmt {post}.
     1. Clear side_vcs.  2. Compute wp.  3. Check pre → wp is valid.
     4. Check each side VC.  5. Print results.
-
-    TODO: Implement this function.
     """
     global side_vcs
     side_vcs = []
@@ -192,9 +188,29 @@ def verify(pre: BExp, stmt: Stmt, post: BExp, label: str = "Program"):
     pre_z3 = bexp_to_z3(pre)
     post_z3 = bexp_to_z3(post)
 
-    # TODO
+    wp_result = wp(stmt, post_z3)
+
     print(f"=== {label} ===")
-    print("  TODO: implement verify()")
+
+    vcs = [("pre → wp", z3.Implies(pre_z3, wp_result))] + \
+          [(name, vc) for name, vc in side_vcs]
+
+    all_valid = True
+    for name, vc in vcs:
+        s = Solver()
+        s.add(z3.Not(vc))
+        result = s.check()
+        if result == unsat:
+            print(f"  [PASS] {name}")
+        else:
+            all_valid = False
+            print(f"  [FAIL] {name}")
+            if result == sat:
+                print(f"         counterexample: {s.model()}")
+            else:
+                print(f"         solver returned: {result}")
+
+    print(f"  → {'VERIFIED' if all_valid else 'FAILED'}")
     print()
 
 
