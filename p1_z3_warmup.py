@@ -15,8 +15,11 @@ def part_a():
     x, y, z = Ints('x y z')
     s = Solver()
 
-    # TODO: Add constraints
-    # s.add(...)
+    # constraints
+    s.add(x+2*y==z)
+    s.add(z>10)
+    s.add(x>0)
+    s.add(y>0)
 
     print("=== Part (a) ===")
     if s.check() == sat:
@@ -36,8 +39,12 @@ def part_b():
     x = Int('x')
     s = Solver()
 
-    # TODO: Add the *negation* of the formula and check UNSAT
-    # s.add(...)
+    # Add the *negation* of the formula and check UNSAT
+    # A -> B := !A or B
+    # !(A -> B) := A and !B
+    # !(x > 5 -> x > 3) := x > 5 and x <= 3  
+    s.add(x > 5)
+    s.add(x <= 3)
 
     print("=== Part (b) ===")
     result = s.check()
@@ -51,7 +58,9 @@ def part_b():
 # ---------------------------------------------------------------------------
 # Part (c) — 5 pts: The EUF Puzzle
 #
-# Formula:  f(f(x)) = x  ∧  f(f(f(x))) = x  ∧  f(x) ≠ x
+# Formula:  f(f(x)) = x  
+#           ∧  f(f(f(x))) = x  
+#           ∧  f(x) ≠ x
 #
 # STEP 1: Check satisfiability with Z3. (2 pts)
 #
@@ -67,8 +76,10 @@ def part_c():
     f = Function('f', S, S)
     s = Solver()
 
-    # TODO: Add the three constraints
-    # s.add(...)
+    # STEP 1: the three constraints
+    s.add(f(f(x)) == x)
+    s.add(f(f(f(x))) == x)
+    s.add(f(x) != x)
 
     print("=== Part (c) ===")
     result = s.check()
@@ -76,7 +87,31 @@ def part_c():
         print(f"SAT: {s.model()}")
     else:
         print("UNSAT")
-    # TODO: Add Z3 derivation steps below (see STEP 2 above).
+
+    # STEP 2: derivation. Each lemma is checked for validity by asserting
+    # the hypotheses + the negation of the conclusion and checking UNSAT.
+    def valid(label, hyps, conclusion):
+        v = Solver()
+        for h in hyps:
+            v.add(h)
+        v.add(Not(conclusion))
+        print(f"  {label}: {'holds' if v.check() == unsat else 'FAILS'}")
+
+    print("Derivation:")
+    # L1: apply f to both sides of f(f(x)) = x  (functional congruence).
+    valid("L1  f(f(x))=x  =>  f(f(f(x))) = f(x)",
+          [f(f(x)) == x],
+          f(f(f(x))) == f(x))
+
+    # L2: combine L1's conclusion with the second axiom by transitivity.
+    valid("L2  f(f(f(x)))=f(x) and f(f(f(x)))=x  =>  f(x) = x",
+          [f(f(f(x))) == f(x), f(f(f(x))) == x],
+          f(x) == x)
+
+    # L3: f(x)=x contradicts the third axiom f(x) != x.
+    valid("L3  f(x)=x and f(x)!=x  =>  False",
+          [f(x) == x, f(x) != x],
+          BoolVal(False))
     print()
 
 
@@ -97,19 +132,28 @@ def part_d():
     print("=== Part (d) ===")
 
     # Axiom 1: Read-over-write HIT
+    # !(i = j -> Select(Store(a, i, v), j) = v) := i = j and Select(Store(a, i, v), j) != v
     s1 = Solver()
-    # TODO: Negate axiom 1 and check UNSAT
-    # s1.add(...)
+    s1.add(i == j)
+    s1.add(Select(Store(a, i, v), j) != v)
     r1 = s1.check()
     print(f"Axiom 1 (hit):  {'Valid' if r1 == unsat else 'INVALID'}")
 
     # Axiom 2: Read-over-write MISS
+    # !(i != j -> Select(Store(a, i, v), j) = Select(a, j)) := i != j and Select(Store(a, i, v), j) != Select(a, j)
     s2 = Solver()
-    # TODO: Negate axiom 2 and check UNSAT
-    # s2.add(...)
+    s2.add(i != j)
+    s2.add(Select(Store(a, i, v), j) != Select(a, j))
     r2 = s2.check()
     print(f"Axiom 2 (miss): {'Valid' if r2 == unsat else 'INVALID'}")
     print()
+
+    # These two axioms fully characterize Store/Select because every
+    # read Select(Store(a, i, v), j) falls into exactly one of two cases —
+    # either j = i (HIT, returns v) or j != i (MISS, defers to the underlying
+    # array a). Together they specify the result of a read at every index for
+    # any sequence of writes, so by induction on the number of stores the
+    # entire functional behavior of arrays is determined.
 
 
 # ---------------------------------------------------------------------------
