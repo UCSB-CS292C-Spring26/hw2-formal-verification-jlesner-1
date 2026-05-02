@@ -257,10 +257,14 @@ def test_mult():
         r := r + b;  i := i + 1;
       { r == a * b }
 
-    TODO: Replace the invariant below with a correct one.
     """
     pre = Compare('>=', Var('a'), IntConst(0))
-    inv = BoolConst(True)  # ← WRONG — replace with correct invariant
+    
+    # 0<=i<=a and r == i*b
+    inv = ImpAnd(ImpAnd(Compare('<=', IntConst(0), Var('i')),                                      
+                      Compare('<=', Var('i'), Var('a'))),                                        
+               Compare('==', Var('r'), BinOp('*', Var('i'), Var('b'))))
+    
     body = Seq(Assign('r', BinOp('+', Var('r'), Var('b'))),
                Assign('i', BinOp('+', Var('i'), IntConst(1))))
     stmt = Seq(Assign('i', IntConst(0)),
@@ -268,6 +272,8 @@ def test_mult():
                    While(Compare('<', Var('i'), Var('a')), inv, body)))
     post = Compare('==', Var('r'), BinOp('*', Var('a'), Var('b')))
     verify(pre, stmt, post, "C1: Multiplication by Addition")
+
+# [EXPLANATION] i iterates from 0 to a during init, preserve, and post which is where I get the first condition. variable r is the result from the muliplication and at every step of i it gets incremented by b so at every step r must equal i*b.  
 
 
 def test_add():
@@ -279,11 +285,15 @@ def test_add():
         r := r + 1;  i := i + 1;
       { r == n + m }
 
-    TODO: Replace the invariant below with a correct one.
     """
     pre = ImpAnd(Compare('>=', Var('n'), IntConst(0)),
                  Compare('>=', Var('m'), IntConst(0)))
-    inv = BoolConst(True)  # ← WRONG — replace with correct invariant
+    
+    # 0<=i<=m and r == i*n
+    inv = ImpAnd(ImpAnd(Compare('<=', IntConst(0), Var('i')),                                      
+                      Compare('<=', Var('i'), Var('m'))),                                        
+               Compare('==', Var('r'), BinOp('+', Var('i'), Var('n'))))
+    
     body = Seq(Assign('r', BinOp('+', Var('r'), IntConst(1))),
                Assign('i', BinOp('+', Var('i'), IntConst(1))))
     stmt = Seq(Assign('i', IntConst(0)),
@@ -292,6 +302,7 @@ def test_add():
     post = Compare('==', Var('r'), BinOp('+', Var('n'), Var('m')))
     verify(pre, stmt, post, "C2: Addition by Loop")
 
+# [EXPLANATION] i iterates from 0 to m during init, preserve, and post stages so thats the first condition. Then r starts at n and then at each i step it gets incremented by 1, so every step r must equal n+i.
 
 def test_sum():
     """
@@ -302,10 +313,15 @@ def test_sum():
         s := s + i;  i := i + 1;
       { 2 * s == n * (n + 1) }
 
-    TODO: Replace the invariant below with a correct one.
     """
     pre = Compare('>=', Var('n'), IntConst(1))
-    inv = BoolConst(True)  # ← WRONG — replace with correct invariant
+
+    # 1 <= i <= n+1 and 2*s == (i-1)*i
+    inv = ImpAnd(ImpAnd(Compare('<=', IntConst(1), Var('i')),
+                        Compare('<=', Var('i'), BinOp('+', Var('n'), IntConst(1)))),
+                 Compare('==', BinOp('*', IntConst(2), Var('s')),
+                         BinOp('*', BinOp('-', Var('i'), IntConst(1)), Var('i'))))
+
     body = Seq(Assign('s', BinOp('+', Var('s'), Var('i'))),
                Assign('i', BinOp('+', Var('i'), IntConst(1))))
     stmt = Seq(Assign('i', IntConst(1)),
@@ -314,6 +330,8 @@ def test_sum():
     post = Compare('==', BinOp('*', IntConst(2), Var('s')),
                    BinOp('*', Var('n'), BinOp('+', Var('n'), IntConst(1))))
     verify(pre, stmt, post, "C3: Sum of 1..n")
+
+# [EXPLANATION] i iterates from 1 to n+1 during init, preserve, and post stages so thats the first condition. Then s starts at 0 and at each i step it gets incremented by i, so after k iterations s == 1+2+...+k where i == k+1, meaning s == (i-1)*i/2. Since IMP only has +,-,* I encode that as 2*s == (i-1)*i.
 
 
 # ============================================================================
@@ -360,12 +378,41 @@ def test_buggy_div():
 
     verify(pre, stmt, post, "Buggy Division (should FAIL)")
 
-    # TODO: Uncomment and fix the invariant below, then re-verify.
-    # inv_fixed = ImpAnd(
-    #     Compare('==', BinOp('+', BinOp('*', Var('q'), Var('y')), Var('r')), Var('x')),
-    #     ???  # ← Add the missing conjunct
-    # )
-    # ... rebuild stmt with inv_fixed and call verify(...)
+    # Postcondition Fails
+    #     === Buggy Division (should FAIL) ===
+    #   [PASS] pre → wp
+    #   [PASS] preservation
+    #   [FAIL] postcondition
+    #          counterexample: [x = -6, y = -4, r = -6, q = 0]
+    #   → FAILED
+
+    # [EXPLANATION] The failing VC is (inv ∧ ¬guard) → post. The invariant
+    # q*y + r == x is true at the counterexample [x=-6, y=-4, r=-6, q=0]
+    # (0*(-4) + (-6) == -6) and the negated guard r < y holds (-6 < -4),
+    # yet the postcondition requires 0 <= r, which fails (r = -6).
+    #
+    # The invariant is too weak because it never propagates the precondition
+    # fact x >= 0 forward as r >= 0. Z3 is free to pick a model with negative
+    # x and y that satisfies inv ∧ ¬guard but violates 0 <= r in the post.
+    # The fix is to strengthen the invariant with the missing conjunct
+    # 0 <= r. After init (q=0, r=x) it follows from x >= 0; the loop body
+    # only runs when r >= y, and combined with the guard plus an inductive
+    # 0 <= r we get new r = r - y >= 0 only if y <= r — which is exactly the
+    # guard — so we additionally need y > 0 in the invariant... actually
+    # not for preservation: r >= y ∧ inv gives r - y >= 0 directly. So the
+    # single missing conjunct is r >= 0.
+
+    inv_fixed = ImpAnd(
+        Compare('==',
+            BinOp('+', BinOp('*', Var('q'), Var('y')), Var('r')),
+            Var('x')),
+        Compare('>=', Var('r'), IntConst(0)))
+
+    stmt_fixed = Seq(Assign('q', IntConst(0)),
+                     Seq(Assign('r', Var('x')),
+                         While(Compare('>=', Var('r'), Var('y')),
+                               inv_fixed, body)))
+    verify(pre, stmt_fixed, post, "Fixed Division (should PASS)")
 
 
 # ============================================================================
@@ -387,34 +434,64 @@ def test_buggy_div():
 def test_wp_derivation():
     """
     Part (a): Use your VCG to compute wp, then check candidate preconditions.
-    TODO: Implement after you finish Part (b).
     """
     print("=== Part (a): WP Derivation ===")
 
-    # TODO: Build the IMP AST for the program above
-    # stmt = Seq(Assign('x', ...), If(...))
-    # post = Compare('>', Var('y'), IntConst(0))
+    # Program:  x := x + 1;
+    #           if x > 0 then y := x * 2 else y := 0 - x;
+    stmt = Seq(
+        Assign('x', BinOp('+', Var('x'), IntConst(1))),
+        If(Compare('>', Var('x'), IntConst(0)),
+           Assign('y', BinOp('*', Var('x'), IntConst(2))),
+           Assign('y', BinOp('-', IntConst(0), Var('x')))))
+    post = Compare('>', Var('y'), IntConst(0))
 
-    # TODO: Compute wp(stmt, post_z3) and print it
-    # wp_result = wp(stmt, bexp_to_z3(post))
-    # print(f"  wp = {wp_result}")
+    wp_result = wp(stmt, bexp_to_z3(post))
+    print(f"  wp = {wp_result}")
+    print(f"  simplified wp = {simplify(wp_result)}")
 
-    # TODO: For each candidate precondition, check if pre → wp is valid
-    # candidates = [
-    #     ("x >= 0",  z3_var('x') >= 0),
-    #     ("x >= -1", z3_var('x') >= -1),
-    #     ("x == -1", z3_var('x') == -1),
-    # ]
-    # for name, pre in candidates:
-    #     s = Solver()
-    #     s.add(Not(Implies(pre, wp_result)))
-    #     result = s.check()
-    #     valid = (result == unsat)
-    #     print(f"  {name}: {'VALID' if valid else 'INVALID'}")
-    #     # [EXPLAIN] in a comment: why is this precondition valid or invalid?
-
-    print("  TODO: implement after Part (b)")
+    candidates = [
+        ("x >= 0",  z3_var('x') >= 0),
+        ("x >= -1", z3_var('x') >= -1),
+        ("x == -1", z3_var('x') == -1),
+    ]
+    for name, pre in candidates:
+        s = Solver()
+        s.add(Not(Implies(pre, wp_result)))
+        result = s.check()
+        valid = (result == unsat)
+        print(f"  {name}: {'VALID' if valid else 'INVALID'}", end="")
+        if not valid and result == sat:
+            print(f"   counterexample: {s.model()}")
+        else:
+            print()
     print()
+
+    # [EXPLANATION]
+    # Working out wp by hand:
+    #   wp(y := x*2, y > 0)         = 2*x > 0
+    #   wp(y := 0 - x, y > 0)       = 0 - x > 0   i.e.  x < 0
+    #   wp(if x>0 then ... else ..., y > 0)
+    #     = (x > 0 -> 2*x > 0) AND (x <= 0 -> x < 0)
+    #     = true AND (x <= 0 -> x < 0)
+    #     which over the integers is x != 0.
+    #   wp(x := x+1, x != 0)        = (x+1) != 0   i.e.  x != -1
+    #
+    # So the true weakest precondition is x != -1. A candidate pre P is a
+    # valid precondition iff P implies x != -1.
+    #
+    # x >= 0:  VALID. If x >= 0 then x is at least 0, so x != -1. After
+    #          x := x+1 we get x >= 1 > 0, the then-branch runs, and
+    #          y = 2*x > 0.
+    #
+    # x >= -1: INVALID. The state x = -1 satisfies the precondition but not
+    #          wp. After x := x+1, x becomes 0, the else-branch runs (since
+    #          x > 0 is false), and y = 0 - 0 = 0, which violates y > 0.
+    #          Z3 should produce x = -1 as the counterexample.
+    #
+    # x == -1: INVALID. This pre forces the exact state that the program
+    #          fails on, so pre -> wp is just false. Same counterexample
+    #          x = -1 and same failing trace as above.
 
 
 # ============================================================================
