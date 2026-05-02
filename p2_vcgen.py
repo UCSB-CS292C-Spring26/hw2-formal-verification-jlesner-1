@@ -477,8 +477,7 @@ def test_wp_derivation():
     #     which over the integers is x != 0.
     #   wp(x := x+1, x != 0)        = (x+1) != 0   i.e.  x != -1
     #
-    # So the true weakest precondition is x != -1. A candidate pre P is a
-    # valid precondition iff P implies x != -1.
+    # So the true weakest precondition is x != -1. A candidate pre P is a valid precondition iff P implies x != -1.
     #
     # x >= 0:  VALID. If x >= 0 then x is at least 0, so x != -1. After
     #          x := x+1 we get x >= 1 > 0, the then-branch runs, and
