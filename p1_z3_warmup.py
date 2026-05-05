@@ -132,7 +132,8 @@ def part_d():
     print("=== Part (d) ===")
 
     # Axiom 1: Read-over-write HIT
-    # !(i = j -> Select(Store(a, i, v), j) = v) := i = j and Select(Store(a, i, v), j) != v
+    # !(i = j -> Select(Store(a, i, v), j) = v) 
+    # := i = j and Select(Store(a, i, v), j) != v
     s1 = Solver()
     s1.add(i == j)
     s1.add(Select(Store(a, i, v), j) != v)
@@ -140,7 +141,8 @@ def part_d():
     print(f"Axiom 1 (hit):  {'Valid' if r1 == unsat else 'INVALID'}")
 
     # Axiom 2: Read-over-write MISS
-    # !(i != j -> Select(Store(a, i, v), j) = Select(a, j)) := i != j and Select(Store(a, i, v), j) != Select(a, j)
+    # !(i != j -> Select(Store(a, i, v), j) = Select(a, j)) 
+    # := i != j and Select(Store(a, i, v), j) != Select(a, j)
     s2 = Solver()
     s2.add(i != j)
     s2.add(Select(Store(a, i, v), j) != Select(a, j))
@@ -148,13 +150,7 @@ def part_d():
     print(f"Axiom 2 (miss): {'Valid' if r2 == unsat else 'INVALID'}")
     print()
 
-    # [EXPLANATION]
-    # These two axioms fully characterize Store/Select because every
-    # read Select(Store(a, i, v), j) falls into exactly one of two cases:
-    # either j = i (HIT, returns v) or j != i (MISS, defers to the underlying
-    # array a). Together they specify the result of a read at every index for
-    # any sequence of writes, so by induction on the number of stores the
-    # entire functional behavior of arrays is determined.
+    # [EXPLANATION] These two axioms fully characterize Store/Select because every read Select(Store(a, i, v), j) falls into exactly one of two cases: either j = i (HIT, returns v) or j != i (MISS, defers to the underlying array a). Together they specify the result of a read at every index for any sequence of writes, so by induction on the number of stores the entire functional behavior of arrays is determined.
 
 
 # ---------------------------------------------------------------------------

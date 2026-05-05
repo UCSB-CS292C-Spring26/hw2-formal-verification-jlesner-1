@@ -62,15 +62,12 @@ def make_policy():
 
     constraints = []
 
-    # The big iff: allowed(u, t, r) holds exactly when one of the rule
-    # branches below fires. This single ForAll captures the entire policy
-    # under a closed-world assumption.
+    # The big iff: allowed(u, t, r) holds exactly when one of the rule branches below fires. This single ForAll captures the entire policy under a closed-world assumption.
     constraints.append(ForAll([u, t, r],
         allowed(u, t, r) ==
         Or(
             # R1: Viewers may ONLY file_read non-sensitive resources.
-            # Note: no other branch mentions viewers, so everything else
-            # is automatically denied for them.
+            # Note: no other branch mentions viewers, so everything ele is automatically denied for them.
             And(role(u) == VIEWER,
                 t == FILE_READ,
                 Not(is_sensitive(r))),
@@ -79,8 +76,7 @@ def make_policy():
             And(role(u) == DEVELOPER,
                 t == FILE_READ),
 
-            # R2b: Developers may file_write resources they own or that
-            # are in the sandbox.
+            # R2b: Developers may file_write resources they own or that are in the sandbox.
             And(role(u) == DEVELOPER,
                 t == FILE_WRITE,
                 Or(owner(r) == u, in_sandbox(r))),
@@ -96,10 +92,7 @@ def make_policy():
                 Or(t == FILE_READ, t == FILE_WRITE)),
 
             # R3 + R5: Admins may network_fetch, but only in sandbox.
-            # R5 says network_fetch is "allowed only on sandbox resources",
-            # which we read as a constraint on when network_fetch is ever
-            # allowed, not a grant of network_fetch to non-admins. So only
-            # admins get network_fetch (via R3), and we fold R5 in here.
+            # R5 says network_fetch is "allowed only on sandbox resources", which we read as a constraint on when network_fetch is ever allowed, not a grant of network_fetch to non-admins. So only admins get network_fetch (via R3), and we fold R5 in here.
             And(role(u) == ADMIN,
                 t == NETWORK_FETCH,
                 in_sandbox(r)),
@@ -141,8 +134,7 @@ def part_b():
     policy = make_policy()
     print("=== Part (b): Policy Queries ===\n")
 
-    # Q1: Can a developer write to a sensitive file they don't own,
-    #     in the sandbox?
+    # Q1: Can a developer write to a sensitive file they don't own, in the sandbox?
     # Expected SAT: R2b allows file_write if owner OR in_sandbox.
     # Sensitivity doesn't restrict file_write for developers.
     u = Const('u_q1', User)
@@ -158,8 +150,7 @@ def part_b():
            allowed(u, FILE_WRITE, r)])
 
     # Q2: Can an admin network_fetch a resource outside the sandbox?
-    # Expected UNSAT: R5 forbids network_fetch outside sandbox for everyone,
-    # including admins. The encoding folds this into the admin branch.
+    # Expected UNSAT: R5 forbids network_fetch outside sandbox for everyone, including admins. The encoding folds this into the admin branch.
     u2 = Const('u_q2', User)
     r2 = Const('r_q2', Resource)
     query("Q2: admin network_fetch outside sandbox?",
@@ -169,8 +160,7 @@ def part_b():
            allowed(u2, NETWORK_FETCH, r2)])
 
     # Q3: Is there ANY role that can shell_exec on a sensitive resource?
-    # Expected UNSAT: R4 forbids this for everyone. We quantify over all
-    # roles by leaving role(u) free.
+    # Expected UNSAT: R4 forbids this for everyone. We quantify over all roles by leaving role(u) free.
     u3 = Const('u_q3', User)
     r3 = Const('r_q3', Resource)
     query("Q3: any role can shell_exec a sensitive resource?",
@@ -180,12 +170,7 @@ def part_b():
 
     # Q4: Remove R4 - what dangerous action becomes possible?
     #
-    # [EXPLANATION] Without R4, admins regain unrestricted shell_exec on any
-    # resource (R3 alone). The dangerous action is: an admin running a shell
-    # command against a sensitive resource (e.g., a secrets file or a
-    # production config). Below we build a policy without the
-    # "Not(is_sensitive(r))" guard on the admin shell_exec branch and show
-    # that admin shell_exec on sensitive is now SAT, with a concrete model.
+    # [EXPLANATION] Without R4, admins regain unrestricted shell_exec on any resource (R3 alone). The dangerous action is: an admin running a shell command against a sensitive resource (e.g., a secrets file or a production config). Below we build a policy without the "Not(is_sensitive(r))" guard on the admin shell_exec branch and show that admin shell_exec on sensitive is now SAT, with a concrete model.
     print("--- Q4: policy without R4 ---")
 
     u4 = Const('u_q4', User)
@@ -246,8 +231,7 @@ def part_c():
     is_sensitive_before = Function('is_sensitive_before', Resource, BoolSort())
     is_sensitive_after  = Function('is_sensitive_after',  Resource, BoolSort())
 
-    # `allowed_t` is parameterized over a sensitivity predicate (passed in
-    # by snapshot). We re-encode the policy + R6 once per snapshot.
+    # `allowed_t` is parameterized over a sensitivity predicate (passed in by snapshot). We re-encode the policy + R6 once per snapshot.
     allowed_before = Function('allowed_before', User, IntSort(), Resource, BoolSort())
     allowed_after  = Function('allowed_after',  User, IntSort(), Resource, BoolSort())
 
@@ -293,21 +277,17 @@ def part_c():
         in_sandbox(r1),
         allowed_before(dev, SHELL_EXEC, r1),
 
-        # Side effect: r1's sensitivity is unchanged (it stays non-sensitive),
-        # but r2's sensitivity flips from True to False.
+        # Side effect: r1's sensitivity is unchanged (it stays non-sensitive), but r2's sensitivity flips from True to False.
         is_sensitive_before(r2),         # r2 starts sensitive
         Not(is_sensitive_after(r2)),     # r2 ends non-sensitive
         # r1 unchanged across the two snapshots.
         is_sensitive_after(r1) == is_sensitive_before(r1),
         in_sandbox(r2),                  # r2 is in the sandbox
 
-        # Step 2: shell_exec on r2 in the AFTER snapshot. Now allowed
-        # because r2 is no longer sensitive.
+        # Step 2: shell_exec on r2 in the AFTER snapshot. Now allowed because r2 is no longer sensitive.
         allowed_after(dev, SHELL_EXEC, r2),
 
-        # The escalation: in the BEFORE snapshot the developer could NOT
-        # shell_exec r2 (it was sensitive). We assert this to make the
-        # attack meaningful, otherwise step 2 would already have been legal.
+        # The escalation: in the BEFORE snapshot the developer could NOT shell_exec r2 (it was sensitive). We assert this to make the attack meaningful, otherwise step 2 would already have been legal.
         Not(allowed_before(dev, SHELL_EXEC, r2)),
     ]
 
@@ -329,21 +309,7 @@ def part_c():
     # ------------------------------------------------------------------
     # The fix.
     # ------------------------------------------------------------------
-    # [EXPLANATION] The escalation works because we trust the AFTER snapshot
-    # for the sensitivity check on step 2, but the dangerous data is the
-    # same data that was sensitive in the BEFORE snapshot. The cleanest
-    # fix is "sticky sensitivity": once a resource has ever been marked
-    # sensitive in the trace, it remains sensitive for permission checks
-    # for the rest of the trace. We encode this as: for the step-2
-    # permission check, treat r as sensitive if it was sensitive in EITHER
-    # snapshot. Equivalently, we add the constraint that the policy in the
-    # AFTER snapshot must use is_sensitive_before OR is_sensitive_after
-    # when deciding shell_exec.
-    #
-    # Concrete implementation: define a fixed allowed_after_fixed that
-    # checks `is_sensitive_before(r) OR is_sensitive_after(r)` for the
-    # shell_exec branch. This blocks the attack because r2 was sensitive
-    # before, so even after the flip, shell_exec on r2 stays denied.
+    # [EXPLANATION] The escalation works because we trust the AFTER snapshot for the sensitivity check on step 2, but the dangerous data is the same data that was sensitive in the BEFORE snapshot. The cleanest fix is "sticky sensitivity": once a resource has ever been marked sensitive in the trace, it remains sensitive for permission checks for the rest of the trace. We encode this as: for the step-2 permission check, treat r as sensitive if it was sensitive in EITHER snapshot. Equivalently, we add the constraint that the policy in the AFTER snapshot must use is_sensitive_before OR is_sensitive_after when deciding shell_exec. Concrete implementation: define a fixed allowed_after_fixed that checks `is_sensitive_before(r) OR is_sensitive_after(r)` for the shell_exec branch. This blocks the attack because r2 was sensitive before, so even after the flip, shell_exec on r2 stays denied.
 
     print("--- Escalation check (with fix: sticky sensitivity) ---")
 

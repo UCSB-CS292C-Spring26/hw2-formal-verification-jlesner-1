@@ -386,21 +386,9 @@ def test_buggy_div():
     #          counterexample: [x = -6, y = -4, r = -6, q = 0]
     #   → FAILED
 
-    # [EXPLANATION] The failing VC is (inv ∧ ¬guard) → post. The invariant
-    # q*y + r == x is true at the counterexample [x=-6, y=-4, r=-6, q=0]
-    # (0*(-4) + (-6) == -6) and the negated guard r < y holds (-6 < -4),
-    # yet the postcondition requires 0 <= r, which fails (r = -6).
+    # [EXPLANATION] The failing VC is (inv ∧ ¬guard) → post. The invariant q*y + r == x is true at the counterexample [x=-6, y=-4, r=-6, q=0] (0*(-4) + (-6) == -6) and the negated guard r < y holds (-6 < -4), yet the postcondition requires 0 <= r, which fails (r = -6).
     #
-    # The invariant is too weak because it never propagates the precondition
-    # fact x >= 0 forward as r >= 0. Z3 is free to pick a model with negative
-    # x and y that satisfies inv ∧ ¬guard but violates 0 <= r in the post.
-    # The fix is to strengthen the invariant with the missing conjunct
-    # 0 <= r. After init (q=0, r=x) it follows from x >= 0; the loop body
-    # only runs when r >= y, and combined with the guard plus an inductive
-    # 0 <= r we get new r = r - y >= 0 only if y <= r — which is exactly the
-    # guard — so we additionally need y > 0 in the invariant... actually
-    # not for preservation: r >= y ∧ inv gives r - y >= 0 directly. So the
-    # single missing conjunct is r >= 0.
+    # The invariant is too weak because it never propagates the precondition fact x >= 0 forward as r >= 0. Z3 is free to pick a model with negative x and y that satisfies inv ∧ ¬guard but violates 0 <= r in the post. The fix is to strengthen the invariant with the missing conjunct 0 <= r. After init (q=0, r=x) it follows from x >= 0; the loop body only runs when r >= y, and combined with the guard plus an inductive 0 <= r we get new r = r - y >= 0 only if y <= r , which is exactly the guard,  so we additionally need y > 0 in the invariant... actually not for preservation: r >= y ∧ inv gives r - y >= 0 directly. So the single missing conjunct is r >= 0.
 
     inv_fixed = ImpAnd(
         Compare('==',
@@ -479,18 +467,11 @@ def test_wp_derivation():
     #
     # So the true weakest precondition is x != -1. A candidate pre P is a valid precondition iff P implies x != -1.
     #
-    # x >= 0:  VALID. If x >= 0 then x is at least 0, so x != -1. After
-    #          x := x+1 we get x >= 1 > 0, the then-branch runs, and
-    #          y = 2*x > 0.
+    # x >= 0:  VALID. If x >= 0 then x is at least 0, so x != -1. After x := x+1 we get x >= 1 > 0, the then-branch runs, and y = 2*x > 0.
     #
-    # x >= -1: INVALID. The state x = -1 satisfies the precondition but not
-    #          wp. After x := x+1, x becomes 0, the else-branch runs (since
-    #          x > 0 is false), and y = 0 - 0 = 0, which violates y > 0.
-    #          Z3 should produce x = -1 as the counterexample.
+    # x >= -1: INVALID. The state x = -1 satisfies the precondition but not wp. After x := x+1, x becomes 0, the else-branch runs (since x > 0 is false), and y = 0 - 0 = 0, which violates y > 0. Z3 should produce x = -1 as the counterexample.
     #
-    # x == -1: INVALID. This pre forces the exact state that the program
-    #          fails on, so pre -> wp is just false. Same counterexample
-    #          x = -1 and same failing trace as above.
+    # x == -1: INVALID. This pre forces the exact state that the program fails on, so pre -> wp is just false. Same counterexample x = -1 and same failing trace as above.
 
 
 # ============================================================================

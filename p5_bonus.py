@@ -76,8 +76,7 @@ def verify_correct_composition():
 
     # Check that (skill_A_post ∧ skill_B_post) → composed_post is valid.
     # By the duality from Lecture 7, a formula φ is valid iff ¬φ is unsat.
-    # So we assert the premises and the negation of the conclusion, then
-    # check for UNSAT.
+    # So we assert the premises and the negation of the conclusion, then check for UNSAT.
     s = Solver()
     s.add(skill_A_post)
     s.add(skill_B_post)
@@ -137,9 +136,7 @@ def verify_buggy_composition():
     )
 
     # Check that the composed postcondition FAILS.
-    # We assert the premises and the negation of the goal. If the result is
-    # SAT, Z3 hands us a state where the buggy skills satisfy their own
-    # postconditions but the composed contract is broken.
+    # We assert the premises and the negation of the goal. If the result is SAT, Z3 hands us a state where the buggy skills satisfy their own postconditions but the composed contract is broken.
     s = Solver()
     s.add(skill_A_post)
     s.add(buggy_B_post)
@@ -183,22 +180,9 @@ def verify_buggy_composition():
 # Part (c): Real-world connection — 3 pts
 #
 # [EXPLANATION]
-# This bug shows up all the time when you chain agent skills that share a
-# working directory. A common case in Claude Code: one skill reads a config
-# file to figure out what to do, and a later skill in the same run writes
-# its output using a path that looks correct but resolves to that same
-# config file. Maybe both paths come from a template, or maybe the second
-# skill picks the "first matching file" and lands on the input by accident.
-# The agent reports success because each skill met its own postcondition,
-# but the input file is now corrupt and the next run reads garbage.
+# This bug shows up all the time when you chain agent skills that share a working directory. A common case in Claude Code: one skill reads a config file to figure out what to do, and a later skill in the same run writes its output using a path that looks correct but resolves to that same config file. Maybe both paths come from a template, or maybe the second skill picks the "first matching file" and lands on the input by accident. The agent reports success because each skill met its own postcondition, but the input file is now corrupt and the next run reads garbage.
 #
-# A runtime monitor (Lecture 10) would catch this with an ordering and
-# write-target rule: track every path read by an upstream skill, then deny
-# any downstream write whose target path matches one of those reads unless
-# the skill explicitly declares it as an output. That is the same kind of
-# DFA monitor we built in Problem 4, just keyed on file paths instead of
-# tool names. The monitor refuses the write before the filesystem changes,
-# so the input stays intact even when the agent's plan is wrong.
+# A runtime monitor (Lecture 10) would catch this with an ordering and write-target rule: track every path read by an upstream skill, then deny any downstream write whose target path matches one of those reads unless the skill explicitly declares it as an output. That is the same kind of DFA monitor we built in Problem 4, just keyed on file paths instead of tool names. The monitor refuses the write before the filesystem changes, so the input stays intact even when the agent's plan is wrong.
 # ============================================================================
 
 
